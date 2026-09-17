@@ -1,6 +1,18 @@
-const EPISODES_URL = "https://api.tvmaze.com/shows/82/episodes";
+const cache = {};
 let allEpisodes = [];
-let hasFetchedEpisodes = false;
+
+async function fetchWithCache(url) {
+  if (cache[url]) {
+    return cache[url];
+  }
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Request to ${url} failed with status ${response.status}`);
+  }
+  const data = await response.json();
+  cache[url] = data;
+  return data;
+}
 
 async function setup() {
   const rootElem = document.getElementById("root");
@@ -8,8 +20,14 @@ async function setup() {
 
   const status = document.createElement("p");
   status.id = "status";
-  status.textContent = "Loading episodes, please wait...";
+  status.textContent = "Loading shows, please wait...";
   rootElem.appendChild(status);
+
+  const showSelector = document.createElement("select");
+  showSelector.id = "show-selector";
+  showSelector.hidden = true;
+  showSelector.addEventListener("change", handleShowChange);
+  rootElem.appendChild(showSelector);
 
   const controls = createControls();
   controls.hidden = true;
@@ -24,29 +42,49 @@ async function setup() {
   rootElem.appendChild(footer);
 
   try {
-    allEpisodes = await fetchEpisodesOnce();
+    const shows = await fetchWithCache("https://api.tvmaze.com/shows");
+    const sortedShows = shows
+      .slice()
+      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+    sortedShows.forEach((show) => {
+      const option = document.createElement("option");
+      option.value = show.id;
+      option.textContent = show.name;
+      showSelector.appendChild(option);
+    });
+
     status.textContent = "";
+    showSelector.hidden = false;
+
+    const defaultShow = sortedShows.find((s) => s.id === 82) || sortedShows[0];
+    showSelector.value = defaultShow.id;
+    await loadEpisodesForShow(defaultShow.id);
     controls.hidden = false;
-    renderEpisodes(allEpisodes);
-    populateSelector(allEpisodes);
   } catch (error) {
-    status.textContent =
-      "Something went wrong loading episodes. Please try refreshing the page.";
+    status.textContent = "Something went wrong loading shows. Please try refreshing the page.";
     console.error(error);
   }
 }
 
-async function fetchEpisodesOnce() {
-  if (hasFetchedEpisodes) {
-    return allEpisodes;
+async function handleShowChange(event) {
+  const showId = event.target.value;
+  const status = document.getElementById("status");
+  status.textContent = "Loading episodes, please wait...";
+  try {
+    await loadEpisodesForShow(showId);
+    status.textContent = "";
+  } catch (error) {
+    status.textContent = "Something went wrong loading episodes. Please try again.";
+    console.error(error);
   }
-  const response = await fetch(EPISODES_URL);
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
-  }
-  const data = await response.json();
-  hasFetchedEpisodes = true;
-  return data;
+}
+
+async function loadEpisodesForShow(showId) {
+  allEpisodes = await fetchWithCache(`https://api.tvmaze.com/shows/${showId}/episodes`);
+  document.getElementById("search-input").value = "";
+  renderEpisodes(allEpisodes);
+  populateSelector(allEpisodes);
 }
 
 function createControls() {
